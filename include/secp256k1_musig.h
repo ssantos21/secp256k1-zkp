@@ -429,6 +429,41 @@ SECP256K1_API SECP256K1_WARN_UNUSED_RESULT int secp256k1_musig_nonce_process(
     const secp256k1_pubkey *adaptor
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5);
 
+/** Takes the public nonces of all signers and computes a session that is
+ *  required for signing and verification of partial signatures.
+ *  This function is identical to `secp256k1_musig_nonce_process` except that
+ *  it will blind the nonce by multiplying it with a blinding factor and also
+ *  will add the blinding factor to the challenge.
+ *
+ *  If the adaptor argument is non-NULL, then the output of
+ *  musig_partial_sig_agg will be a pre-signature which is not a valid Schnorr
+ *  signature. In order to create a valid signature, the pre-signature and the
+ *  secret adaptor must be provided to `musig_adapt`.
+ *
+ *  Returns: 0 if the arguments are invalid or if some signer sent invalid
+ *           pubnonces, 1 otherwise
+ *  Args:          ctx: pointer to a context object
+ *  Out:       session: pointer to a struct to store the session
+ *  In:       aggnonce: pointer to an aggregate public nonce object that is the
+ *                      output of musig_nonce_agg
+ *              msg32:  the 32-byte message to sign
+ *       keyagg_cache:  pointer to the keyagg_cache that was used to create the
+ *                      aggregate (and potentially tweaked) pubkey
+ *            adaptor:  optional pointer to an adaptor point encoded as a public
+ *                      key if this signing session is part of an adaptor
+ *                      signature protocol (can be NULL)
+ *    blinding_factor:  random value used to blind the nonce and the challenge
+ */
+int secp256k1_blinded_musig_nonce_process(
+    const secp256k1_context* ctx, 
+    secp256k1_musig_session *session, 
+    const secp256k1_musig_aggnonce  *aggnonce, 
+    const unsigned char *msg32, 
+    const secp256k1_musig_keyagg_cache *keyagg_cache, 
+    const secp256k1_pubkey *adaptor,
+    unsigned char* blinding_factor
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(7);
+
 /** Produces a partial signature
  *
  *  This function overwrites the given secnonce with zeros and will abort if given a

@@ -537,6 +537,134 @@ int secp256k1_musig_nonce_process(const secp256k1_context* ctx, secp256k1_musig_
     return 1;
 }
 
+static int secp256k1_blinded_musig_nonce_process_internal(
+    int *fin_nonce_parity, 
+    unsigned char *fin_nonce, 
+    secp256k1_scalar *b, 
+    secp256k1_gej *aggnoncej, 
+    const unsigned char *agg_pk32, 
+    const unsigned char *msg,
+    const secp256k1_ge *blinding_pk) 
+{
+    unsigned char noncehash[32];
+    secp256k1_ge fin_nonce_pt;
+    secp256k1_gej fin_nonce_ptj;
+    secp256k1_ge aggnonce[2];
+    int ret;
+
+
+    secp256k1_ge_set_gej(&aggnonce[0], &aggnoncej[0]);
+    secp256k1_ge_set_gej(&aggnonce[1], &aggnoncej[1]);
+    if (!secp256k1_musig_compute_noncehash(noncehash, aggnonce, agg_pk32, msg)) {
+        return 0;
+    }
+    /* fin_nonce = aggnonce[0] + b*aggnonce[1] */
+    secp256k1_scalar_set_b32(b, noncehash, NULL);
+    secp256k1_gej_set_infinity(&fin_nonce_ptj);
+    secp256k1_ecmult(&fin_nonce_ptj, &aggnoncej[1], b, NULL);
+    secp256k1_gej_add_ge_var(&fin_nonce_ptj, &fin_nonce_ptj, &aggnonce[0], NULL);
+    secp256k1_gej_add_ge_var(&fin_nonce_ptj, &fin_nonce_ptj, blinding_pk, NULL);
+    secp256k1_ge_set_gej(&fin_nonce_pt, &fin_nonce_ptj);
+    if (secp256k1_ge_is_infinity(&fin_nonce_pt)) {
+        fin_nonce_pt = secp256k1_ge_const_g;
+    }
+
+    ret = secp256k1_xonly_ge_serialize(fin_nonce, &fin_nonce_pt);
+    /* Can't fail since fin_nonce_pt is not infinity */
+    VERIFY_CHECK(ret);
+    secp256k1_fe_normalize_var(&fin_nonce_pt.y);
+    *fin_nonce_parity = secp256k1_fe_is_odd(&fin_nonce_pt.y);
+    return 1;
+}
+
+int secp256k1_blinded_musig_nonce_process(
+    const secp256k1_context* ctx, 
+    secp256k1_musig_session *session, 
+    const secp256k1_musig_aggnonce  *aggnonce, 
+    const unsigned char *msg32, 
+    const secp256k1_musig_keyagg_cache *keyagg_cache, 
+    const secp256k1_pubkey *adaptor,
+    unsigned char* blinding_factor) 
+{
+    secp256k1_keyagg_cache_internal cache_i;
+    secp256k1_ge aggnonce_pt[2];
+    secp256k1_gej aggnonce_ptj[2];
+    unsigned char fin_nonce[32];
+    secp256k1_musig_session_internal session_i;
+    unsigned char agg_pk32[32];
+
+    int overflow = 0;
+
+    secp256k1_scalar blinding_factor_s;
+    secp256k1_ge blinding_pk;
+
+    VERIFY_CHECK(ctx != NULL);
+    ARG_CHECK(session != NULL);
+    ARG_CHECK(aggnonce != NULL);
+    ARG_CHECK(msg32 != NULL);
+    ARG_CHECK(keyagg_cache != NULL);
+    ARG_CHECK(blinding_factor != NULL);
+
+    memset(&session_i, 0, sizeof(session_i));
+
+    secp256k1_ge_set_infinity(&blinding_pk);
+
+    if (!secp256k1_keyagg_cache_load(ctx, &cache_i, keyagg_cache)) {
+        return 0;
+    }
+    secp256k1_fe_get_b32(agg_pk32, &cache_i.pk.x);
+
+    memcpy(&blinding_pk, &cache_i.pk, sizeof(secp256k1_ge));
+
+    secp256k1_scalar_set_b32(&blinding_factor_s, blinding_factor, &overflow);
+    if(overflow) {
+        return 0;
+    }
+
+    if(!secp256k1_eckey_pubkey_tweak_mul(&blinding_pk, &blinding_factor_s)) {
+        return 0;
+    }
+
+    if (!secp256k1_musig_aggnonce_load(ctx, aggnonce_pt, aggnonce)) {
+        return 0;
+    }
+    secp256k1_gej_set_ge(&aggnonce_ptj[0], &aggnonce_pt[0]);
+    secp256k1_gej_set_ge(&aggnonce_ptj[1], &aggnonce_pt[1]);
+    /* Add public adaptor to nonce */
+    if (adaptor != NULL) {
+        secp256k1_ge adaptorp;
+        if (!secp256k1_pubkey_load(ctx, &adaptorp, adaptor)) {
+            return 0;
+        }
+        secp256k1_gej_add_ge_var(&aggnonce_ptj[0], &aggnonce_ptj[0], &adaptorp, NULL);
+    }
+    if (!secp256k1_blinded_musig_nonce_process_internal(&session_i.fin_nonce_parity, fin_nonce, &session_i.noncecoef, aggnonce_ptj, agg_pk32, msg32, &blinding_pk)) {
+        return 0;
+    }
+
+    secp256k1_schnorrsig_challenge(&session_i.challenge, fin_nonce, msg32, 32, agg_pk32);
+
+    if (secp256k1_fe_is_odd(&cache_i.pk.y) != session_i.fin_nonce_parity) {
+        secp256k1_scalar_negate(&blinding_factor_s, &blinding_factor_s);
+    }
+
+    secp256k1_scalar_add(&session_i.challenge, &session_i.challenge, &blinding_factor_s);
+
+    /* If there is a tweak then set `challenge` times `tweak` to the `s`-part.*/
+    secp256k1_scalar_set_int(&session_i.s_part, 0);
+    if (!secp256k1_scalar_is_zero(&cache_i.tweak)) {
+        secp256k1_scalar e_tmp;
+        secp256k1_scalar_mul(&e_tmp, &session_i.challenge, &cache_i.tweak);
+        if (secp256k1_fe_is_odd(&cache_i.pk.y)) {
+            secp256k1_scalar_negate(&e_tmp, &e_tmp);
+        }
+        secp256k1_scalar_add(&session_i.s_part, &session_i.s_part, &e_tmp);
+    }
+    memcpy(session_i.fin_nonce, fin_nonce, sizeof(session_i.fin_nonce));
+    secp256k1_musig_session_save(session, &session_i);
+    return 1;
+}
+
 static void secp256k1_musig_partial_sign_clear(secp256k1_scalar *sk, secp256k1_scalar *k) {
     secp256k1_scalar_clear(sk);
     secp256k1_scalar_clear(&k[0]);

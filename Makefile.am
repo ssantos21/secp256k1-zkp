@@ -190,10 +190,18 @@ musig_example_SOURCES = examples/musig.c
 musig_example_CPPFLAGS = -I$(top_srcdir)/include -DSECP256K1_STATIC
 musig_example_LDADD = libsecp256k1.la
 musig_example_LDFLAGS = -static
+
+noinst_PROGRAMS += blinded_musig_example
+blinded_musig_example_SOURCES = examples/blinded_musig.c
+blinded_musig_example_CPPFLAGS = -I$(top_srcdir)/include -DSECP256K1_STATIC
+blinded_musig_example_LDADD = libsecp256k1.la
+blinded_musig_example_LDFLAGS = -static
 if BUILD_WINDOWS
 musig_example_LDFLAGS += -lbcrypt
+blinded_musig_example_LDFLAGS += -lbcrypt
 endif
 TESTS += musig_example
+TESTS += blinded_musig_example
 endif
 endif
 
