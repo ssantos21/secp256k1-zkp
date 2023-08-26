@@ -96,6 +96,10 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     secp256k1_musig_partial_sig server_partial_sig;
 
+    unsigned char keyaggcoef[32];
+
+    int negate_seckey;
+
     unsigned char sig[64];
 
     /* Start Execution */  
@@ -195,13 +199,19 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     printf("Signing message ...\t\t\t\t");
 
+    if (!secp256k1_musig_get_keyaggcoef_and_negation_seckey(ctx, keyaggcoef, &negate_seckey, &cache, &server_pubkey)) {
+        printf("fail\n");
+        printf("Failed to calculate server key aggregation coefficient\n");
+        return 0;
+    }
+
     if (!secp256k1_musig_partial_sign(ctx, &client_partial_sig, &client_secnonce, &client_keypair, &cache, &session)) {
         printf("fail\n");
         printf("Client failed to sign message\n");
         return 0;
     }
 
-    if (!secp256k1_musig_partial_sign(ctx, &server_partial_sig, &server_secnonce, &server_keypair, &cache, &session)) {
+    if (!secp256k1_blinded_musig_partial_sign(ctx, &server_partial_sig, &server_secnonce, &server_keypair, &session, keyaggcoef, negate_seckey)) {
         printf("fail\n");
         printf("Server failed to sign message\n");
         return 0;

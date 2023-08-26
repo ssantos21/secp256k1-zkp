@@ -671,6 +671,39 @@ static void secp256k1_musig_partial_sign_clear(secp256k1_scalar *sk, secp256k1_s
     secp256k1_scalar_clear(&k[1]);
 }
 
+int secp256k1_musig_get_keyaggcoef_and_negation_seckey(
+    const secp256k1_context* ctx,
+    unsigned char *keyaggcoef, 
+    int *negate_seckey,
+    const secp256k1_musig_keyagg_cache *keyagg_cache, 
+    const secp256k1_pubkey *pubkey
+) {
+    secp256k1_scalar r;
+    secp256k1_ge pk;
+    secp256k1_keyagg_cache_internal cache_i;
+
+    if (!secp256k1_pubkey_load(ctx, &pk, pubkey)) {
+        return 0;
+    }
+
+    secp256k1_fe_normalize_var(&pk.y);
+    secp256k1_fe_normalize_var(&pk.x);
+
+    if (!secp256k1_keyagg_cache_load(ctx, &cache_i, keyagg_cache)) {
+        return 0;
+    }
+
+    secp256k1_musig_keyaggcoef(&r, &cache_i, &pk);
+    secp256k1_scalar_get_b32(keyaggcoef, &r);
+
+    /* Negate sk if secp256k1_fe_is_odd(&cache_i.pk.y)) XOR cache_i.parity_acc.
+     * This corresponds to the line "Let d = g⋅gacc⋅d' mod n" in the
+     * specification. */
+    *negate_seckey = (secp256k1_fe_is_odd(&cache_i.pk.y) != cache_i.parity_acc);
+
+    return 1;
+}
+
 int secp256k1_musig_partial_sign(const secp256k1_context* ctx, secp256k1_musig_partial_sig *partial_sig, secp256k1_musig_secnonce *secnonce, const secp256k1_keypair *keypair, const secp256k1_musig_keyagg_cache *keyagg_cache, const secp256k1_musig_session *session) {
     secp256k1_scalar sk;
     secp256k1_ge pk, keypair_pk;
@@ -722,6 +755,82 @@ int secp256k1_musig_partial_sign(const secp256k1_context* ctx, secp256k1_musig_p
     secp256k1_fe_normalize_var(&pk.x);
     /* TODO Cache mu */
     secp256k1_musig_keyaggcoef(&mu, &cache_i, &pk);
+    secp256k1_scalar_mul(&sk, &sk, &mu);
+
+    if (!secp256k1_musig_session_load(ctx, &session_i, session)) {
+        secp256k1_musig_partial_sign_clear(&sk, k);
+        return 0;
+    }
+
+    if (session_i.fin_nonce_parity) {
+        secp256k1_scalar_negate(&k[0], &k[0]);
+        secp256k1_scalar_negate(&k[1], &k[1]);
+    }
+
+    /* Sign */
+    secp256k1_scalar_mul(&s, &session_i.challenge, &sk);
+    secp256k1_scalar_mul(&k[1], &session_i.noncecoef, &k[1]);
+    secp256k1_scalar_add(&k[0], &k[0], &k[1]);
+    secp256k1_scalar_add(&s, &s, &k[0]);
+    secp256k1_musig_partial_sig_save(partial_sig, &s);
+    secp256k1_musig_partial_sign_clear(&sk, k);
+    return 1;
+}
+
+SECP256K1_API int secp256k1_blinded_musig_partial_sign(
+    const secp256k1_context *ctx,
+    secp256k1_musig_partial_sig *partial_sig,
+    secp256k1_musig_secnonce *secnonce,
+    const secp256k1_keypair *keypair,
+    const secp256k1_musig_session *session,
+    const unsigned char *keyaggcoef,
+    const int negate_seckey
+)
+{
+    secp256k1_scalar sk;
+    secp256k1_ge pk, keypair_pk;
+    secp256k1_scalar k[2];
+    secp256k1_scalar mu, s;
+    secp256k1_musig_session_internal session_i;
+    int ret;
+
+    VERIFY_CHECK(ctx != NULL);
+
+    ARG_CHECK(secnonce != NULL);
+    /* Fails if the magic doesn't match */
+    ret = secp256k1_musig_secnonce_load(ctx, k, &pk, secnonce);
+    /* Set nonce to zero to avoid nonce reuse. This will cause subsequent calls
+     * of this function to fail */
+    memset(secnonce, 0, sizeof(*secnonce));
+    if (!ret) {
+        secp256k1_musig_partial_sign_clear(&sk, k);
+        return 0;
+    }
+
+    ARG_CHECK(partial_sig != NULL);
+    ARG_CHECK(keypair != NULL);
+    ARG_CHECK(session != NULL);
+
+    if (!secp256k1_keypair_load(ctx, &sk, &keypair_pk, keypair)) {
+        secp256k1_musig_partial_sign_clear(&sk, k);
+        return 0;
+    }
+    ARG_CHECK(secp256k1_fe_equal_var(&pk.x, &keypair_pk.x)
+              && secp256k1_fe_equal_var(&pk.y, &keypair_pk.y));
+
+    secp256k1_fe_normalize_var(&pk.y);
+
+    /* Negate sk if secp256k1_fe_is_odd(&cache_i.pk.y)) XOR cache_i.parity_acc.
+     * This corresponds to the line "Let d = g⋅gacc⋅d' mod n" in the
+     * specification. */
+    if (negate_seckey) {
+        secp256k1_scalar_negate(&sk, &sk);
+    }
+
+    /* Multiply KeyAgg coefficient */
+    secp256k1_fe_normalize_var(&pk.x);
+
+    secp256k1_scalar_set_b32(&mu, keyaggcoef, NULL);
     secp256k1_scalar_mul(&sk, &sk, &mu);
 
     if (!secp256k1_musig_session_load(ctx, &session_i, session)) {
