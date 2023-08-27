@@ -223,7 +223,7 @@ int test_sign_verify(secp256k1_context* ctx) {
         return 0;
     }
 
-    if (!secp256k1_musig_partial_sig_verify(ctx, &client_partial_sig, &client_pubnonce, &client_pubkey, &cache, &session)) {
+    if (!secp256k1_musig_partial_sig_verify(ctx, &server_partial_sig, &server_pubnonce, &server_pubkey, &cache, &session)) {
         printf("fail\n");
         printf("Failed to verify server partial signature\n");
         return 0;
