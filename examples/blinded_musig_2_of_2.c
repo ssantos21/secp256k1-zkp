@@ -35,8 +35,7 @@ static int create_nonces(
     secp256k1_musig_secnonce* secnonce,
     secp256k1_musig_pubnonce* pubnonce, 
     const unsigned char* seckey,
-    const secp256k1_pubkey* pubkey,
-    const unsigned char* msg
+    const secp256k1_pubkey* pubkey
 ) {
     unsigned char session_id[32];
 
@@ -45,7 +44,7 @@ static int create_nonces(
         return 0;
     }
 
-    if (!secp256k1_musig_nonce_gen(ctx, secnonce, pubnonce, session_id, seckey, pubkey, msg, NULL, NULL)) {
+    if (!secp256k1_musig_nonce_gen(ctx, secnonce, pubnonce, session_id, seckey, pubkey, NULL, NULL, NULL)) {
         printf("Failed to generate nonce\n");
         return 0;
     }
@@ -150,13 +149,13 @@ int test_sign_verify(secp256k1_context* ctx) {
     memset(&server_secnonce, 0, sizeof(server_secnonce));
     memset(&server_pubnonce, 0, sizeof(server_pubnonce));  
 
-    if (!create_nonces(ctx, &client_secnonce, &client_pubnonce,  client_seckey, &client_pubkey, msg)) {
+    if (!create_nonces(ctx, &client_secnonce, &client_pubnonce,  client_seckey, &client_pubkey)) {
         printf("fail\n");
         printf("Failed to generate client nonce\n");
         return 0;
     }
 
-    if (!create_nonces(ctx, &server_secnonce, &server_pubnonce,  server_seckey, &server_pubkey, msg)) {
+    if (!create_nonces(ctx, &server_secnonce, &server_pubnonce,  server_seckey, &server_pubkey)) {
         printf("fail\n");
         printf("Failed to generate server nonce\n");
         return 0;
