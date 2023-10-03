@@ -524,6 +524,21 @@ SECP256K1_API int secp256k1_musig_partial_sign(
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(6);
 
 /**
+ * Get challenge from session.
+ * 
+ * Returns: 0 if the arguments are invalid, 1 otherwise
+ * 
+ * Args:         ctx: pointer to a context object
+ * In:           session: session data
+ * Out:          challenge: pointer to a 32-byte array to store the challenge
+*/
+SECP256K1_API int secp256k1_get_challenge_from_session(
+    const secp256k1_context* ctx, 
+    const secp256k1_musig_session *session,
+    unsigned char* challenge
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2);
+
+/**
  * Removes the final nonce from the session and returns it.
  *
  * Returns: 0 if the arguments are invalid, 1 otherwise

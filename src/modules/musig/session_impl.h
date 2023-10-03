@@ -777,6 +777,19 @@ int secp256k1_musig_partial_sign(const secp256k1_context* ctx, secp256k1_musig_p
     return 1;
 }
 
+SECP256K1_API int secp256k1_get_challenge_from_session(
+    const secp256k1_context* ctx, 
+    const secp256k1_musig_session *session,
+    unsigned char* challenge
+) {
+    secp256k1_musig_session_internal session_i;
+    if (!secp256k1_musig_session_load(ctx, &session_i, session)) {
+        return 0;
+    }
+    secp256k1_scalar_get_b32(challenge, &session_i.challenge);
+    return 1;
+}
+
 SECP256K1_API int secp256k1_blinded_musig_remove_fin_nonce_from_session(
     const secp256k1_context *ctx,
     secp256k1_musig_session *session
