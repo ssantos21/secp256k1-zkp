@@ -523,6 +523,18 @@ SECP256K1_API int secp256k1_musig_partial_sign(
     const secp256k1_musig_session *session
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(6);
 
+/**
+ * Removes the final nonce from the session and returns it.
+ *
+ * Returns: 0 if the arguments are invalid, 1 otherwise
+ *
+ * Args:         ctx: pointer to a context object
+ * In/Out:       session: pointer to the session with final nonce removed
+ */
+SECP256K1_API int secp256k1_blinded_musig_remove_fin_nonce_from_session(
+    const secp256k1_context *ctx,
+    secp256k1_musig_session *session
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2);
 
 /** Produces a blinded partial signature
  *

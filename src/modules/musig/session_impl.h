@@ -777,6 +777,24 @@ int secp256k1_musig_partial_sign(const secp256k1_context* ctx, secp256k1_musig_p
     return 1;
 }
 
+SECP256K1_API int secp256k1_blinded_musig_remove_fin_nonce_from_session(
+    const secp256k1_context *ctx,
+    secp256k1_musig_session *session
+) {
+    secp256k1_musig_session_internal session_i;
+
+    VERIFY_CHECK(ctx != NULL);
+    ARG_CHECK(session != NULL);
+
+    if (!secp256k1_musig_session_load(ctx, &session_i, session)) {
+        return 0;
+    }
+
+    memset(session_i.fin_nonce, 0, sizeof(session_i.fin_nonce));
+    secp256k1_musig_session_save(session, &session_i);
+    return 1;
+}
+
 SECP256K1_API int secp256k1_blinded_musig_partial_sign(
     const secp256k1_context *ctx,
     secp256k1_musig_partial_sig *partial_sig,
