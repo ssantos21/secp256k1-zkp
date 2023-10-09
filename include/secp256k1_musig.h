@@ -200,6 +200,15 @@ SECP256K1_API int secp256k1_musig_get_keyaggcoef_and_negation_seckey(
     const secp256k1_pubkey *pubkey
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5);
 
+/**
+ * Returns if the secret key should be negated.
+ * 
+ * Returns: 1 when the secret key should be negated, 0 otherwise.
+ * Args:    ctx: a secp256k1 context object
+ * Out:     negate_seckey: pointer to an int to store the negation flag
+ * In:      aggregate_pubkey: pointer to the aggregate public key
+ *          parity_acc: the parity of the aggregate public key
+ */
 SECP256K1_API int secp256k1_musig_negate_seckey(
     const secp256k1_context* ctx,
     const secp256k1_pubkey *aggregate_pubkey, 
@@ -498,7 +507,32 @@ int secp256k1_blinded_musig_nonce_process(
     unsigned char* blinding_factor
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(7);
 
-int secp256k1_blinded_musig_nonce_process_2(
+/** Takes the public nonces of all signers and computes a session that is
+ *  required for signing and verification of partial signatures.
+ *  This function is identical to `secp256k1_musig_nonce_process` except that
+ *  it will blind the nonce by multiplying it with a blinding factor and also
+ *  will add the blinding factor to the challenge.
+ *
+ *  If the adaptor argument is non-NULL, then the output of
+ *  musig_partial_sig_agg will be a pre-signature which is not a valid Schnorr
+ *  signature. In order to create a valid signature, the pre-signature and the
+ *  secret adaptor must be provided to `musig_adapt`.
+ *
+ *  Returns: 0 if the arguments are invalid or if some signer sent invalid
+ *           pubnonces, 1 otherwise
+ *  Args:          ctx: pointer to a context object
+ *  Out:       session: pointer to a struct to store the session
+ *  In:       aggnonce: pointer to an aggregate public nonce object that is the
+ *                      output of musig_nonce_agg
+ *              msg32:  the 32-byte message to sign
+ *   aggregate_pubkey:  pointer to the aggregate public key
+ *            adaptor:  optional pointer to an adaptor point encoded as a public
+ *                      key if this signing session is part of an adaptor
+ *                      signature protocol (can be NULL)
+ *    blinding_factor:  random value used to blind the nonce and the challenge
+ *            tweak32:  pointer to a 32-byte tweak.
+ */
+int secp256k1_blinded_musig_nonce_process_without_keyaggcoeff(
     const secp256k1_context* ctx, 
     secp256k1_musig_session *session, 
     const secp256k1_musig_aggnonce  *aggnonce, 

@@ -235,7 +235,7 @@ int test_sign_verify(
 
     printf("Creating session context ...\t\t\t");
 
-    if (!secp256k1_blinded_musig_nonce_process_2(ctx, &session, &agg_pubnonce, msg, &output_pubkey, NULL, blinding_factor, out_tweak32)) {
+    if (!secp256k1_blinded_musig_nonce_process_without_keyaggcoeff(ctx, &session, &agg_pubnonce, msg, &output_pubkey, NULL, blinding_factor, out_tweak32)) {
         printf("fail\n");
         printf("Failed to create session context\n");
         return 0;

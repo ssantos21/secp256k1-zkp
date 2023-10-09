@@ -665,7 +665,7 @@ int secp256k1_blinded_musig_nonce_process(
     return 1;
 }
 
-int secp256k1_blinded_musig_nonce_process_2(
+int secp256k1_blinded_musig_nonce_process_without_keyaggcoeff(
     const secp256k1_context* ctx, 
     secp256k1_musig_session *session, 
     const secp256k1_musig_aggnonce  *aggnonce, 
