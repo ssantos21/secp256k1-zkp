@@ -203,8 +203,18 @@ SECP256K1_API int secp256k1_musig_get_keyaggcoef_and_negation_seckey(
 SECP256K1_API int secp256k1_musig_negate_seckey(
     const secp256k1_context* ctx,
     const secp256k1_pubkey *aggregate_pubkey, 
+    const int parity_acc,
     int *negate_seckey
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2);
+
+SECP256K1_API int secp256k1_blinded_musig_pubkey_xonly_tweak_add(
+    const secp256k1_context* ctx, 
+    secp256k1_pubkey *output_pubkey, 
+    int *parity_acc,
+    const secp256k1_pubkey *aggregate_pubkey, 
+    const unsigned char *tweak32, 
+    unsigned char *out_tweak32
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(6);
 
 /** Computes an aggregate public key and uses it to initialize a keyagg_cache
  *
@@ -495,8 +505,9 @@ int secp256k1_blinded_musig_nonce_process_2(
     const unsigned char *msg32, 
     const secp256k1_pubkey *aggregate_pubkey, 
     const secp256k1_pubkey *adaptor,
-    unsigned char* blinding_factor
-) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(7); 
+    unsigned char* blinding_factor,
+    const unsigned char *tweak32
+) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(7) SECP256K1_ARG_NONNULL(8); 
 
 /** Produces a partial signature
  *
@@ -657,7 +668,8 @@ SECP256K1_API SECP256K1_WARN_UNUSED_RESULT int secp256k1_blinded_musig_partial_s
     const secp256k1_pubkey *pubkey, 
     const unsigned char *keyaggcoef,
     const secp256k1_pubkey *aggregate_pubkey, 
-    const secp256k1_musig_session *session
+    const secp256k1_musig_session *session,
+    const int parity_acc
 ) SECP256K1_ARG_NONNULL(1) SECP256K1_ARG_NONNULL(2) SECP256K1_ARG_NONNULL(3) SECP256K1_ARG_NONNULL(4) SECP256K1_ARG_NONNULL(5) SECP256K1_ARG_NONNULL(6);
 
 /** Aggregates partial signatures

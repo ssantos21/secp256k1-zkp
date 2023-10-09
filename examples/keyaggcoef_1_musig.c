@@ -117,6 +117,8 @@ int test_sign_verify(secp256k1_context* ctx) {
     secp256k1_pubkey aggregate_pubkey;
     secp256k1_xonly_pubkey aggregate_xonly_pubkey;
 
+    secp256k1_pubkey output_pubkey;
+
     unsigned char blinding_factor[32];
 
     unsigned char msg[32] = "9f86d081884c7d659a2feaa0c55ad015";
@@ -134,6 +136,14 @@ int test_sign_verify(secp256k1_context* ctx) {
     const secp256k1_musig_partial_sig *partial_sigs[2];
 
     unsigned char sig[64];
+
+    int parity_acc = 0;
+
+    unsigned char tweak32[32] = "this could be a taproot tweak..";
+
+    unsigned char out_tweak32[32];
+
+    memset(out_tweak32, 0, sizeof(out_tweak32));
 
 /*     secp256k1_xonly_pubkey aggregate_xonly_pubkey_2;
     secp256k1_musig_keyagg_cache cache; */
@@ -168,14 +178,13 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     memset(&aggregate_pubkey, 0, sizeof(aggregate_pubkey));
 
-    print_pubkey(ctx, &client_pubkey, "Client pubkey: ");
-    print_pubkey(ctx, &server_pubkey, "Server pubkey: ");
-
     if (!secp256k1_ec_pubkey_combine(ctx, &aggregate_pubkey, pubkeys_ptr, 2)) {
         printf("fail\n");
         printf("Failed to generate aggregated public key\n");
         return 0;
     }
+
+    memcpy(&output_pubkey, &aggregate_pubkey, sizeof(aggregate_pubkey));
 
     if (!secp256k1_xonly_pubkey_from_pubkey(ctx, &aggregate_xonly_pubkey, NULL, &aggregate_pubkey)) {
         printf("fail\n");
@@ -232,9 +241,25 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     printf("ok\n");
 
+    printf("Tweaking ...\t\t\t\t\t");
+
+    if (!secp256k1_blinded_musig_pubkey_xonly_tweak_add(ctx, &output_pubkey, &parity_acc, &aggregate_pubkey, tweak32, out_tweak32)) {
+        printf("fail\n");
+        printf("Failed to tweak aggregate public key\n");
+        return 0;
+    }
+
+    if (!secp256k1_xonly_pubkey_from_pubkey(ctx, &aggregate_xonly_pubkey, NULL, &output_pubkey)) {
+        printf("fail\n");
+        printf("Failed to generate aggregated x-only public key\n");
+        return 0;
+    }
+
+    printf("ok\n");
+
     printf("Creating session context ...\t\t\t");
 
-    if (!secp256k1_blinded_musig_nonce_process_2(ctx, &session, &agg_pubnonce, msg, &aggregate_pubkey, NULL, blinding_factor)) {
+    if (!secp256k1_blinded_musig_nonce_process_2(ctx, &session, &agg_pubnonce, msg, &output_pubkey, NULL, blinding_factor, out_tweak32)) {
         printf("fail\n");
         printf("Failed to create session context\n");
         return 0;
@@ -250,7 +275,7 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     memcpy(&server_session, &session, sizeof(session));
 
-    if (!secp256k1_musig_negate_seckey(ctx, &aggregate_pubkey, &negate_seckey)) {
+    if (!secp256k1_musig_negate_seckey(ctx, &output_pubkey, parity_acc, &negate_seckey)) {
         printf("fail\n");
         printf("Failed to calculate server key aggregation coefficient\n");
         return 0;
@@ -278,13 +303,13 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     printf("Verifying partial signatures ...\t\t");
 
-    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &client_partial_sig, &client_pubnonce, &client_pubkey, keyaggcoef, &aggregate_pubkey, &session)) {
+    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &client_partial_sig, &client_pubnonce, &client_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
         printf("fail\n");
         printf("Failed to verify client partial signature\n");
         return 0;
     }
 
-    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &server_partial_sig, &server_pubnonce, &server_pubkey, keyaggcoef, &aggregate_pubkey, &session)) {
+    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &server_partial_sig, &server_pubnonce, &server_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
         printf("fail\n");
         printf("Failed to verify server partial signature\n");
         return 0;

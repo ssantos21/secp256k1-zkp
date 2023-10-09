@@ -672,13 +672,16 @@ int secp256k1_blinded_musig_nonce_process_2(
     const unsigned char *msg32, 
     const secp256k1_pubkey *aggregate_pubkey, 
     const secp256k1_pubkey *adaptor,
-    unsigned char* blinding_factor) 
+    unsigned char* blinding_factor,
+    const unsigned char *tweak32) 
 {
     secp256k1_ge aggnonce_pt[2];
     secp256k1_gej aggnonce_ptj[2];
     unsigned char fin_nonce[32];
     secp256k1_musig_session_internal session_i;
     unsigned char agg_pk32[32];
+
+    secp256k1_scalar tweak;
 
     int overflow = 0;
 
@@ -699,6 +702,11 @@ int secp256k1_blinded_musig_nonce_process_2(
 
     /* convert aggregate_pubkey to secp256k1_ge*/
     if (!secp256k1_pubkey_load(ctx, &aggregate_pubkey_ge, aggregate_pubkey)) {
+        return 0;
+    }
+
+    secp256k1_scalar_set_b32(&tweak, tweak32, &overflow);
+    if (overflow) {
         return 0;
     }
 
@@ -743,15 +751,15 @@ int secp256k1_blinded_musig_nonce_process_2(
     /* If there is a tweak then set `challenge` times `tweak` to the `s`-part.*/
     secp256k1_scalar_set_int(&session_i.s_part, 0);
     /* this part is not yet supported in blinded scheme. It assumes cache_i.tweak is zero */
-    /* if (!secp256k1_scalar_is_zero(&cache_i.tweak)) {
+    if (!secp256k1_scalar_is_zero(&tweak)) {
         secp256k1_scalar e_tmp;
-        secp256k1_scalar_mul(&e_tmp, &session_i.challenge, &cache_i.tweak);
-        if (secp256k1_fe_is_odd(&cache_i.pk.y)) {
+        secp256k1_scalar_mul(&e_tmp, &session_i.challenge, &tweak);
+        if (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y)) {
             secp256k1_scalar_negate(&e_tmp, &e_tmp);
         }
         secp256k1_scalar_add(&session_i.s_part, &session_i.s_part, &e_tmp);
     }
-    */
+    
     memcpy(session_i.fin_nonce, fin_nonce, sizeof(session_i.fin_nonce));
     secp256k1_musig_session_save(session, &session_i);
     return 1;
@@ -791,8 +799,6 @@ int secp256k1_musig_get_keyaggcoef_and_negation_seckey(
     /* Negate sk if secp256k1_fe_is_odd(&cache_i.pk.y)) XOR cache_i.parity_acc.
      * This corresponds to the line "Let d = g⋅gacc⋅d' mod n" in the
      * specification. */
-    printf("cache_i.parity_acc: %d", cache_i.parity_acc);
-
     *negate_seckey = (secp256k1_fe_is_odd(&cache_i.pk.y) != cache_i.parity_acc);
 
     return 1;
@@ -801,6 +807,7 @@ int secp256k1_musig_get_keyaggcoef_and_negation_seckey(
 int secp256k1_musig_negate_seckey(
     const secp256k1_context* ctx,
     const secp256k1_pubkey *aggregate_pubkey, 
+    const int parity_acc,
     int *negate_seckey
 ){
     secp256k1_ge aggregate_pubkey_ge;
@@ -809,8 +816,61 @@ int secp256k1_musig_negate_seckey(
         return 0;
     }
 
-    *negate_seckey = (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y) != 0);
+    *negate_seckey = (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y) != parity_acc);
 
+    return 1;
+}
+
+int secp256k1_blinded_musig_pubkey_xonly_tweak_add(
+    const secp256k1_context* ctx, 
+    secp256k1_pubkey *output_pubkey, 
+    int *parity_acc,
+    const secp256k1_pubkey *aggregate_pubkey, 
+    const unsigned char *tweak32, 
+    unsigned char *out_tweak32
+){
+    secp256k1_ge aggregated_pubkey_ge;
+    secp256k1_scalar tweak;
+    secp256k1_scalar out_tweak;
+    int overflow = 0;
+
+    VERIFY_CHECK(ctx != NULL);
+    if (output_pubkey != NULL) {
+        memset(output_pubkey, 0, sizeof(*output_pubkey));
+    }
+    ARG_CHECK(aggregate_pubkey != NULL);
+    ARG_CHECK(tweak32 != NULL);
+
+    secp256k1_scalar_set_b32(&tweak, tweak32, &overflow);
+    if (overflow) {
+        return 0;
+    }
+
+    secp256k1_scalar_set_b32(&out_tweak, out_tweak32, &overflow);
+    if (overflow) {
+        return 0;
+    }
+
+    if (!secp256k1_pubkey_load(ctx, &aggregated_pubkey_ge, aggregate_pubkey)) {
+        return 0;
+    }
+
+    if (secp256k1_extrakeys_ge_even_y(&aggregated_pubkey_ge)) {
+        *parity_acc ^= 1;
+        secp256k1_scalar_negate(&out_tweak, &out_tweak);
+    }
+
+    secp256k1_scalar_add(&out_tweak, &out_tweak, &tweak);
+    if (!secp256k1_eckey_pubkey_tweak_add(&aggregated_pubkey_ge, &out_tweak)) {
+        return 0;
+    }
+
+    /* eckey_pubkey_tweak_add fails if cache_i.pk is infinity */
+    VERIFY_CHECK(!secp256k1_ge_is_infinity(&aggregated_pubkey_ge));
+    secp256k1_scalar_get_b32 (out_tweak32, &out_tweak);
+    if (output_pubkey != NULL) {
+        secp256k1_pubkey_save(output_pubkey, &aggregated_pubkey_ge);
+    }
     return 1;
 }
 
@@ -1066,7 +1126,8 @@ int secp256k1_blinded_musig_partial_sig_verify(
     const secp256k1_pubkey *pubkey, 
     const unsigned char *keyaggcoef,
     const secp256k1_pubkey *aggregate_pubkey, 
-    const secp256k1_musig_session *session
+    const secp256k1_musig_session *session,
+    const int parity_acc
 ) {
     secp256k1_musig_session_internal session_i;
     secp256k1_scalar mu, e, s;
@@ -1117,7 +1178,7 @@ int secp256k1_blinded_musig_partial_sig_verify(
             != cache_i.parity_acc) {
         secp256k1_scalar_negate(&e, &e);
     }*/ 
-    if (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y) != 0) {
+    if (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y) != parity_acc) {
         secp256k1_scalar_negate(&e, &e);
     }
 
