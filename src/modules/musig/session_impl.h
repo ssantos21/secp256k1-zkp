@@ -665,6 +665,98 @@ int secp256k1_blinded_musig_nonce_process(
     return 1;
 }
 
+int secp256k1_blinded_musig_nonce_process_2(
+    const secp256k1_context* ctx, 
+    secp256k1_musig_session *session, 
+    const secp256k1_musig_aggnonce  *aggnonce, 
+    const unsigned char *msg32, 
+    const secp256k1_pubkey *aggregate_pubkey, 
+    const secp256k1_pubkey *adaptor,
+    unsigned char* blinding_factor) 
+{
+    secp256k1_ge aggnonce_pt[2];
+    secp256k1_gej aggnonce_ptj[2];
+    unsigned char fin_nonce[32];
+    secp256k1_musig_session_internal session_i;
+    unsigned char agg_pk32[32];
+
+    int overflow = 0;
+
+    secp256k1_ge aggregate_pubkey_ge;
+
+    secp256k1_scalar blinding_factor_s;
+    secp256k1_ge blinding_pk;
+
+    VERIFY_CHECK(ctx != NULL);
+    ARG_CHECK(session != NULL);
+    ARG_CHECK(aggnonce != NULL);
+    ARG_CHECK(msg32 != NULL);
+    ARG_CHECK(blinding_factor != NULL);
+
+    memset(&session_i, 0, sizeof(session_i));
+
+    secp256k1_ge_set_infinity(&blinding_pk);
+
+    /* convert aggregate_pubkey to secp256k1_ge*/
+    if (!secp256k1_pubkey_load(ctx, &aggregate_pubkey_ge, aggregate_pubkey)) {
+        return 0;
+    }
+
+    secp256k1_fe_get_b32(agg_pk32, &aggregate_pubkey_ge.x);
+
+    memcpy(&blinding_pk, &aggregate_pubkey_ge, sizeof(secp256k1_ge));
+
+    secp256k1_scalar_set_b32(&blinding_factor_s, blinding_factor, &overflow);
+    if(overflow) {
+        return 0;
+    }
+
+    if(!secp256k1_eckey_pubkey_tweak_mul(&blinding_pk, &blinding_factor_s)) {
+        return 0;
+    }
+
+    if (!secp256k1_musig_aggnonce_load(ctx, aggnonce_pt, aggnonce)) {
+        return 0;
+    }
+    secp256k1_gej_set_ge(&aggnonce_ptj[0], &aggnonce_pt[0]);
+    secp256k1_gej_set_ge(&aggnonce_ptj[1], &aggnonce_pt[1]);
+    /* Add public adaptor to nonce */
+    if (adaptor != NULL) {
+        secp256k1_ge adaptorp;
+        if (!secp256k1_pubkey_load(ctx, &adaptorp, adaptor)) {
+            return 0;
+        }
+        secp256k1_gej_add_ge_var(&aggnonce_ptj[0], &aggnonce_ptj[0], &adaptorp, NULL);
+    }
+    if (!secp256k1_blinded_musig_nonce_process_internal(&session_i.fin_nonce_parity, fin_nonce, &session_i.noncecoef, aggnonce_ptj, agg_pk32, msg32, &blinding_pk)) {
+        return 0;
+    }
+
+    secp256k1_schnorrsig_challenge(&session_i.challenge, fin_nonce, msg32, 32, agg_pk32);
+
+    if (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y) != session_i.fin_nonce_parity) {
+        secp256k1_scalar_negate(&blinding_factor_s, &blinding_factor_s);
+    }
+
+    secp256k1_scalar_add(&session_i.challenge, &session_i.challenge, &blinding_factor_s);
+
+    /* If there is a tweak then set `challenge` times `tweak` to the `s`-part.*/
+    secp256k1_scalar_set_int(&session_i.s_part, 0);
+    /* this part is not yet supported in blinded scheme. It assumes cache_i.tweak is zero */
+    /* if (!secp256k1_scalar_is_zero(&cache_i.tweak)) {
+        secp256k1_scalar e_tmp;
+        secp256k1_scalar_mul(&e_tmp, &session_i.challenge, &cache_i.tweak);
+        if (secp256k1_fe_is_odd(&cache_i.pk.y)) {
+            secp256k1_scalar_negate(&e_tmp, &e_tmp);
+        }
+        secp256k1_scalar_add(&session_i.s_part, &session_i.s_part, &e_tmp);
+    }
+    */
+    memcpy(session_i.fin_nonce, fin_nonce, sizeof(session_i.fin_nonce));
+    secp256k1_musig_session_save(session, &session_i);
+    return 1;
+}
+
 static void secp256k1_musig_partial_sign_clear(secp256k1_scalar *sk, secp256k1_scalar *k) {
     secp256k1_scalar_clear(sk);
     secp256k1_scalar_clear(&k[0]);
@@ -699,7 +791,25 @@ int secp256k1_musig_get_keyaggcoef_and_negation_seckey(
     /* Negate sk if secp256k1_fe_is_odd(&cache_i.pk.y)) XOR cache_i.parity_acc.
      * This corresponds to the line "Let d = g⋅gacc⋅d' mod n" in the
      * specification. */
+    printf("cache_i.parity_acc: %d", cache_i.parity_acc);
+
     *negate_seckey = (secp256k1_fe_is_odd(&cache_i.pk.y) != cache_i.parity_acc);
+
+    return 1;
+}
+
+int secp256k1_musig_negate_seckey(
+    const secp256k1_context* ctx,
+    const secp256k1_pubkey *aggregate_pubkey, 
+    int *negate_seckey
+){
+    secp256k1_ge aggregate_pubkey_ge;
+
+    if (!secp256k1_pubkey_load(ctx, &aggregate_pubkey_ge, aggregate_pubkey)) {
+        return 0;
+    }
+
+    *negate_seckey = (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y) != 0);
 
     return 1;
 }
@@ -931,6 +1041,83 @@ int secp256k1_musig_partial_sig_verify(const secp256k1_context* ctx, const secp2
      * in the specification. */
     if (secp256k1_fe_is_odd(&cache_i.pk.y)
             != cache_i.parity_acc) {
+        secp256k1_scalar_negate(&e, &e);
+    }
+
+    if (!secp256k1_musig_partial_sig_load(ctx, &s, partial_sig)) {
+        return 0;
+    }
+    /* Compute -s*G + e*pkj + rj (e already includes the keyagg coefficient mu) */
+    secp256k1_scalar_negate(&s, &s);
+    secp256k1_gej_set_ge(&pkj, &pkp);
+    secp256k1_ecmult(&tmp, &pkj, &e, &s);
+    if (session_i.fin_nonce_parity) {
+        secp256k1_gej_neg(&rj, &rj);
+    }
+    secp256k1_gej_add_var(&tmp, &tmp, &rj, NULL);
+
+    return secp256k1_gej_is_infinity(&tmp);
+}
+
+int secp256k1_blinded_musig_partial_sig_verify(
+    const secp256k1_context* ctx, 
+    const secp256k1_musig_partial_sig *partial_sig, 
+    const secp256k1_musig_pubnonce *pubnonce, 
+    const secp256k1_pubkey *pubkey, 
+    const unsigned char *keyaggcoef,
+    const secp256k1_pubkey *aggregate_pubkey, 
+    const secp256k1_musig_session *session
+) {
+    secp256k1_musig_session_internal session_i;
+    secp256k1_scalar mu, e, s;
+    secp256k1_gej pkj;
+    secp256k1_ge nonce_pt[2];
+    secp256k1_gej rj;
+    secp256k1_gej tmp;
+    secp256k1_ge pkp;
+    secp256k1_ge aggregate_pubkey_ge;
+
+    VERIFY_CHECK(ctx != NULL);
+    ARG_CHECK(partial_sig != NULL);
+    ARG_CHECK(pubnonce != NULL);
+    ARG_CHECK(pubkey != NULL);
+    ARG_CHECK(session != NULL);
+
+    if (!secp256k1_musig_session_load(ctx, &session_i, session)) {
+        return 0;
+    }
+
+    /* convert aggregate_pubkey to secp256k1_ge*/
+    if (!secp256k1_pubkey_load(ctx, &aggregate_pubkey_ge, aggregate_pubkey)) {
+        return 0;
+    }
+
+    /* Compute "effective" nonce rj = aggnonce[0] + b*aggnonce[1] */
+    /* TODO: use multiexp to compute -s*G + e*mu*pubkey + aggnonce[0] + b*aggnonce[1] */
+    if (!secp256k1_musig_pubnonce_load(ctx, nonce_pt, pubnonce)) {
+        return 0;
+    }
+    secp256k1_gej_set_ge(&rj, &nonce_pt[1]);
+    secp256k1_ecmult(&rj, &rj, &session_i.noncecoef, NULL);
+    secp256k1_gej_add_ge_var(&rj, &rj, &nonce_pt[0], NULL);
+
+    if (!secp256k1_pubkey_load(ctx, &pkp, pubkey)) {
+        return 0;
+    }
+    /* Multiplying the challenge by the KeyAgg coefficient is equivalent
+     * to multiplying the signer's public key by the coefficient, except
+     * much easier to do. */
+    secp256k1_scalar_set_b32(&mu, keyaggcoef, NULL);
+    secp256k1_scalar_mul(&e, &session_i.challenge, &mu);
+
+    /* Negate e if secp256k1_fe_is_odd(&cache_i.pk.y)) XOR cache_i.parity_acc.
+     * This corresponds to the line "Let g' = g⋅gacc mod n" and the multiplication "g'⋅e"
+     * in the specification. */
+    /* if (secp256k1_fe_is_odd(&cache_i.pk.y)
+            != cache_i.parity_acc) {
+        secp256k1_scalar_negate(&e, &e);
+    }*/ 
+    if (secp256k1_fe_is_odd(&aggregate_pubkey_ge.y) != 0) {
         secp256k1_scalar_negate(&e, &e);
     }
 
