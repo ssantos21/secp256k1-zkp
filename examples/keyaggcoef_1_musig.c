@@ -132,8 +132,6 @@ int test_sign_verify(
 
     secp256k1_musig_session session;
 
-    unsigned char keyaggcoef[32];
-
     int negate_seckey = 0;
 
     const secp256k1_musig_partial_sig *partial_sigs[2];
@@ -245,10 +243,6 @@ int test_sign_verify(
 
     printf("Signing message ...\t\t\t\t");
 
-    /* set keyaggcoef to 1 */
-    memset(&keyaggcoef, 0, sizeof(keyaggcoef));
-    keyaggcoef[31] = 1;
-
     memcpy(&server_session, &session, sizeof(session));
 
     if (!secp256k1_musig_negate_seckey(ctx, &output_pubkey, parity_acc, &negate_seckey)) {
@@ -257,7 +251,7 @@ int test_sign_verify(
         return 0;
     }
 
-    if (!secp256k1_blinded_musig_partial_sign(ctx, &client_partial_sig, &client_secnonce, client_keypair, &session, keyaggcoef, negate_seckey)) {
+    if (!secp256k1_blinded_musig_partial_sign_without_keyaggcoeff(ctx, &client_partial_sig, &client_secnonce, client_keypair, &session, negate_seckey)) {
         printf("fail\n");
         printf("Server failed to sign message\n");
         return 0;
@@ -269,7 +263,7 @@ int test_sign_verify(
         return 0;
     }
 
-    if (!secp256k1_blinded_musig_partial_sign(ctx, &server_partial_sig, &server_secnonce, server_keypair, &server_session, keyaggcoef, negate_seckey)) {
+    if (!secp256k1_blinded_musig_partial_sign_without_keyaggcoeff(ctx, &server_partial_sig, &server_secnonce, server_keypair, &server_session, negate_seckey)) {
         printf("fail\n");
         printf("Server failed to sign message\n");
         return 0;
@@ -279,13 +273,13 @@ int test_sign_verify(
 
     printf("Verifying partial signatures ...\t\t");
 
-    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &client_partial_sig, &client_pubnonce, client_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
+    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &client_partial_sig, &client_pubnonce, client_pubkey, &output_pubkey, &session, parity_acc)) {
         printf("fail\n");
         printf("Failed to verify client partial signature\n");
         return 0;
     }
 
-    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &server_partial_sig, &server_pubnonce, server_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
+    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &server_partial_sig, &server_pubnonce, server_pubkey, &output_pubkey, &session, parity_acc)) {
         printf("fail\n");
         printf("Failed to verify server partial signature\n");
         return 0;
@@ -441,13 +435,13 @@ int main(void) {
     if (!create_keypair(ctx, &client_keypair, &client_pubkey, client_seckey)) {
         printf("fail\n");
         printf("Failed to generate client keypair\n");
-        return 0;
+        return 1;
     }
 
     if (!create_keypair(ctx, &server_keypair, &server_pubkey, server_seckey)) {
         printf("fail\n");
         printf("Failed to generate server keypair\n");
-        return 0;
+        return 1;
     }
 
     printf("ok\n");
