@@ -88,22 +88,25 @@ static int create_nonces(
     return 1;
 }
 
-int test_sign_verify(secp256k1_context* ctx) {
-    /* Client data */
-    secp256k1_keypair client_keypair;
-    unsigned char client_seckey[32];
-    secp256k1_pubkey client_pubkey;
+int test_sign_verify(
+    secp256k1_context* ctx,
 
+    const secp256k1_keypair *client_keypair,
+    const unsigned char *client_seckey,
+    const  secp256k1_pubkey *client_pubkey,
+
+    const secp256k1_keypair *server_keypair,
+    const  unsigned char *server_seckey,
+    const secp256k1_pubkey *server_pubkey
+
+) {
+    /* Client data */
     secp256k1_musig_secnonce client_secnonce;
     secp256k1_musig_pubnonce client_pubnonce;
 
     secp256k1_musig_partial_sig client_partial_sig;
 
     /* Server data */
-    secp256k1_keypair server_keypair;
-    unsigned char server_seckey[32];
-    secp256k1_pubkey server_pubkey;
-
     secp256k1_musig_secnonce server_secnonce;
     secp256k1_musig_pubnonce server_pubnonce;
 
@@ -145,36 +148,9 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     memset(out_tweak32, 0, sizeof(out_tweak32));
 
-/*     secp256k1_xonly_pubkey aggregate_xonly_pubkey_2;
-    secp256k1_musig_keyagg_cache cache; */
-
-    printf("Creating client and server key pairs ...\t");
-
-    memset(&client_keypair, 0, sizeof(client_keypair));
-    memset(&client_pubkey, 0, sizeof(client_pubkey));
-    memset(&client_seckey, 0, sizeof(client_seckey));
-
-    memset(&server_keypair, 0, sizeof(server_keypair));
-    memset(&server_seckey, 0, sizeof(server_seckey));
-    memset(&server_pubkey, 0, sizeof(server_pubkey));
-
-    if (!create_keypair(ctx, &client_keypair, &client_pubkey, client_seckey)) {
-        printf("fail\n");
-        printf("Failed to generate client keypair\n");
-        return 0;
-    }
-
-    if (!create_keypair(ctx, &server_keypair, &server_pubkey, server_seckey)) {
-        printf("fail\n");
-        printf("Failed to generate server keypair\n");
-        return 0;
-    }
-
-    printf("ok\n");
-
     printf("Generate the aggregated x-only public key ...\t");
-    pubkeys_ptr[0] = &client_pubkey;
-    pubkeys_ptr[1] = &server_pubkey;
+    pubkeys_ptr[0] = client_pubkey;
+    pubkeys_ptr[1] = server_pubkey;
 
     memset(&aggregate_pubkey, 0, sizeof(aggregate_pubkey));
 
@@ -204,13 +180,13 @@ int test_sign_verify(secp256k1_context* ctx) {
     memset(&server_secnonce, 0, sizeof(server_secnonce));
     memset(&server_pubnonce, 0, sizeof(server_pubnonce));  
 
-    if (!create_nonces(ctx, &client_secnonce, &client_pubnonce,  client_seckey, &client_pubkey)) {
+    if (!create_nonces(ctx, &client_secnonce, &client_pubnonce,  client_seckey, client_pubkey)) {
         printf("fail\n");
         printf("Failed to generate client nonce\n");
         return 0;
     }
 
-    if (!create_nonces(ctx, &server_secnonce, &server_pubnonce,  server_seckey, &server_pubkey)) {
+    if (!create_nonces(ctx, &server_secnonce, &server_pubnonce,  server_seckey, server_pubkey)) {
         printf("fail\n");
         printf("Failed to generate server nonce\n");
         return 0;
@@ -281,7 +257,7 @@ int test_sign_verify(secp256k1_context* ctx) {
         return 0;
     }
 
-    if (!secp256k1_blinded_musig_partial_sign(ctx, &client_partial_sig, &client_secnonce, &client_keypair, &session, keyaggcoef, negate_seckey)) {
+    if (!secp256k1_blinded_musig_partial_sign(ctx, &client_partial_sig, &client_secnonce, client_keypair, &session, keyaggcoef, negate_seckey)) {
         printf("fail\n");
         printf("Server failed to sign message\n");
         return 0;
@@ -293,7 +269,7 @@ int test_sign_verify(secp256k1_context* ctx) {
         return 0;
     }
 
-    if (!secp256k1_blinded_musig_partial_sign(ctx, &server_partial_sig, &server_secnonce, &server_keypair, &server_session, keyaggcoef, negate_seckey)) {
+    if (!secp256k1_blinded_musig_partial_sign(ctx, &server_partial_sig, &server_secnonce, server_keypair, &server_session, keyaggcoef, negate_seckey)) {
         printf("fail\n");
         printf("Server failed to sign message\n");
         return 0;
@@ -303,13 +279,13 @@ int test_sign_verify(secp256k1_context* ctx) {
 
     printf("Verifying partial signatures ...\t\t");
 
-    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &client_partial_sig, &client_pubnonce, &client_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
+    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &client_partial_sig, &client_pubnonce, client_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
         printf("fail\n");
         printf("Failed to verify client partial signature\n");
         return 0;
     }
 
-    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &server_partial_sig, &server_pubnonce, &server_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
+    if (!secp256k1_blinded_musig_partial_sig_verify(ctx, &server_partial_sig, &server_pubnonce, server_pubkey, keyaggcoef, &output_pubkey, &session, parity_acc)) {
         printf("fail\n");
         printf("Failed to verify server partial signature\n");
         return 0;
@@ -342,17 +318,158 @@ int test_sign_verify(secp256k1_context* ctx) {
     }    
 }
 
+int test_key_update(
+    secp256k1_context* ctx,
+
+    const unsigned char *client_seckey,
+    const  secp256k1_pubkey *client_pubkey,
+
+    const  unsigned char *server_seckey,
+    const secp256k1_pubkey *server_pubkey
+) {
+    secp256k1_keypair new_client_keypair;
+    unsigned char new_client_seckey[32];
+    secp256k1_pubkey new_client_pubkey;
+
+    unsigned char x1[32];
+    unsigned char t1[32];
+    unsigned char t2[32];
+
+    unsigned char new_server_seckey[32];
+    secp256k1_pubkey new_server_pubkey;
+
+    secp256k1_pubkey aggregate_pubkey;
+    secp256k1_pubkey new_aggregate_pubkey;
+
+    const secp256k1_pubkey *pubkeys_ptr[2];
+
+    int return_val;
+
+    pubkeys_ptr[0] = client_pubkey;
+    pubkeys_ptr[1] = server_pubkey;
+
+    if (!secp256k1_ec_pubkey_combine(ctx, &aggregate_pubkey, pubkeys_ptr, 2)) {
+        printf("fail\n");
+        printf("Failed to generate aggregated public key\n");
+        return 0;
+    }    
+
+    while (1) {
+        if (!fill_random(x1, sizeof(x1))) {
+            printf("Failed to generate randomness\n");
+            return 0;
+        }
+        break;
+    }
+
+    memcpy(t1, client_seckey, 32);
+    /* sender: t1 = privkey + x1 */
+    return_val = secp256k1_ec_seckey_tweak_add(ctx, t1, x1);
+    assert(return_val);
+
+    memset(&new_client_keypair, 0, sizeof(new_client_keypair));
+    memset(&new_client_seckey, 0, sizeof(new_client_seckey));
+    memset(&new_client_pubkey, 0, sizeof(new_client_pubkey));
+
+    if (!create_keypair(ctx, &new_client_keypair, &new_client_pubkey, new_client_seckey)) {
+        printf("fail\n");
+        printf("Failed to generate client keypair\n");
+        return 0;
+    }
+
+    /* t2 = t1 - privkey */
+    memcpy(t2, new_client_seckey, sizeof(new_client_seckey));
+    return_val = secp256k1_ec_seckey_negate(ctx, t2);
+    assert(return_val);
+    return_val = secp256k1_ec_seckey_tweak_add(ctx, t2, t1);
+    assert(return_val);
+
+    memcpy(new_server_seckey, server_seckey, 32);
+
+    /* enclave_privkey = enclave_privkey + t2 - x1 */
+    return_val = secp256k1_ec_seckey_tweak_add(ctx, new_server_seckey, t2);
+    assert(return_val);
+    return_val = secp256k1_ec_seckey_negate(ctx, x1);
+    return_val = secp256k1_ec_seckey_tweak_add(ctx, new_server_seckey, x1);
+    assert(return_val);
+
+    return_val = secp256k1_ec_pubkey_create(ctx, &new_server_pubkey, new_server_seckey);
+    assert(return_val);
+
+    pubkeys_ptr[0] = &new_client_pubkey;
+    pubkeys_ptr[1] = &new_server_pubkey;
+
+    if (!secp256k1_ec_pubkey_combine(ctx, &new_aggregate_pubkey, pubkeys_ptr, 2)) {
+        printf("fail\n");
+        printf("Failed to generate aggregated public key\n");
+        return 0;
+    }
+
+    print_pubkey(ctx, &aggregate_pubkey, "Old Agg Key: ");
+    print_pubkey(ctx, &new_aggregate_pubkey, "New Agg Key: ");
+    
+    return_val = memcmp(&aggregate_pubkey, &new_aggregate_pubkey, sizeof(aggregate_pubkey));
+    assert(return_val == 0);
+
+    return 1;
+}
+
 int main(void) {
     secp256k1_context* ctx;
     int result_verify;
+    
+    secp256k1_keypair client_keypair;
+    unsigned char client_seckey[32];
+    secp256k1_pubkey client_pubkey;
+
+    secp256k1_keypair server_keypair;
+    unsigned char server_seckey[32];
+    secp256k1_pubkey server_pubkey;
+
     ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
 
-    result_verify = test_sign_verify(ctx);
+    printf("Creating client and server key pairs ...\t");
+
+    memset(&client_keypair, 0, sizeof(client_keypair));
+    memset(&client_pubkey, 0, sizeof(client_pubkey));
+    memset(&client_seckey, 0, sizeof(client_seckey));
+
+    memset(&server_keypair, 0, sizeof(server_keypair));
+    memset(&server_seckey, 0, sizeof(server_seckey));
+    memset(&server_pubkey, 0, sizeof(server_pubkey));
+
+    if (!create_keypair(ctx, &client_keypair, &client_pubkey, client_seckey)) {
+        printf("fail\n");
+        printf("Failed to generate client keypair\n");
+        return 0;
+    }
+
+    if (!create_keypair(ctx, &server_keypair, &server_pubkey, server_seckey)) {
+        printf("fail\n");
+        printf("Failed to generate server keypair\n");
+        return 0;
+    }
+
+    printf("ok\n");
+
+    result_verify = test_sign_verify(ctx,
+        &client_keypair, client_seckey, &client_pubkey,
+        &server_keypair, server_seckey, &server_pubkey
+    );
     if (!result_verify) {
-        printf("Execution failed\n");
+        printf("Signature failed\n");
         return 1;
     } else {
-        printf("Execution succeeded\n");
+        printf("Signature succeeded\n");
+    }
+
+    result_verify = test_key_update(ctx, client_seckey, &client_pubkey, server_seckey, &server_pubkey);
+
+    if (!result_verify) {
+        printf("Key Update failed\n");
+        return 1;
+    } else {
+        printf("Key Update succeeded\n");
     }
 
     secp256k1_context_destroy(ctx);
